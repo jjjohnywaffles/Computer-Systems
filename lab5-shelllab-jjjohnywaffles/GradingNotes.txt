@@ -1,0 +1,92 @@
+The program should pass all traces and I found if there is a problem usually refreshing the terminal would fix it. 
+
+These notes address the 4 main points brought up in the forum post:
+(i) Child Process Flow (After Fork Call)
+(ii) Signaling Mechanism (Where to Setup Signal & Block/Unblock)
+(iii) sigchld_handler Conditions and Cases
+(iv) Kill Usage in Different Places (Handler Functions, do_bgfg, etc.)
+
+----------------------------------------------------
+
+(i) Child Process Flow (After Fork Call):
+
+The child process is created after the fork() call in the eval() function. In this code:
+
+if ((pid = fork()) == 0) {
+    setpgid(0, 0); // Assign a unique process group ID to the child
+    sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock SIGCHLD
+    // Execute the new program using execvp
+    if (execvp(argv[0], argv) < 0) {
+        printf("%s: Command not found\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+}
+
+The child process is created to execute the command specified by the user. 
+It first sets its own process group ID to avoid receiving SIGINT (Ctrl-C) or SIGTSTP (Ctrl-Z) from the keyboard. 
+Then, it unblocks the SIGCHLD signal, which was previously blocked to prevent the signal from interrupting the process before proper initialization. 
+Finally, the execvp() function is called to replace the child process image with the specified command, effectively running the requested program. 
+If execvp() fails, an error message is printed, and the child process exits.
+
+----------------------------------------------------
+
+(ii) Signaling Mechanism (Where to Setup Signal & Block/Unblock):
+
+Signal handling and blocking/unblocking are what allows proper job control within the program. 
+In the main function, the Signal() function is used to set up signal handlers for various signals. 
+Signal handlers are registered using this function, allowing the program to catch and respond to signals. 
+
+For example:
+
+    Signal(SIGINT,  sigint_handler);   // Register sigint_handler for Ctrl-C (SIGINT)
+    Signal(SIGTSTP, sigtstp_handler);  // Register sigtstp_handler for Ctrl-Z (SIGTSTP)
+    Signal(SIGCHLD, sigchld_handler);  // Register sigchld_handler for child process termination (SIGCHLD)
+
+Additionally, in the eval() function, the SIGCHLD signal is blocked before forking the child process to prevent it from being delivered before the child has been fully initialized:
+
+    sigprocmask(SIG_BLOCK, &mask, NULL); // Block SIGCHLD
+
+After forking, the child process unblocks the SIGCHLD signal before executing the new program:
+    
+    sigprocmask(SIG_UNBLOCK, &mask, NULL); // Unblock SIGCHLD
+
+This ensures that the SIGCHLD signal will be delivered to the parent process when the child terminates.
+
+----------------------------------------------------
+
+(iii) sigchld_handler Conditions and Cases:
+
+The sigchld_handler() function handles the SIGCHLD signal, which is sent to the shell whenever a child job terminates or stops due to receiving a SIGSTOP or SIGTSTP signal. 
+The function waits for terminated child processes using waitpid() with the WNOHANG and WUNTRACED options. 
+It then checks the status to determine how the process was terminated. 
+
+Three main cases are considered for process terminiation:
+
+    WIFEXITED(status): The child process terminated normally, and its exit status is retrieved. The job is removed from the job list using deletejob().
+
+    WIFSIGNALED(status): The child process was terminated by a signal. The job is removed from the job list, and a message is printed indicating the termination by a signal.
+
+    WIFSTOPPED(status): The child process was stopped by a signal (e.g., SIGSTOP, SIGTSTP). The job's state is set to stopped, and a message is printed indicating the stoppage by a 
+    signal.
+    
+----------------------------------------------------
+
+(iv) Kill Usage in Different Places (Handler Functions, do_bgfg, etc.):
+
+The kill() function is used to send signals to processes or process groups. 
+In the sigtstp_handler() and sigint_handler() functions, it's used to send SIGTSTP and SIGINT signals, respectively, to foreground jobs. 
+
+For example:
+
+    // In sigtstp_handler():
+    kill(-pid, sig); // Send SIGTSTP signal to the foreground process group
+
+    // In sigint_handler():
+    kill(-pid, sig); // Send SIGINT signal to the foreground process group
+    
+In the do_bgfg() function, kill() is used to continue the execution of a job in the background (bg command) by sending a SIGCONT signal:
+
+    // Continue the process before changing the state of the stopped job
+    kill(-jobp->pid, SIGCONT); // Send SIGCONT signal to the foreground process group
+
+The kill() function is used to control the execution state of jobs by sending appropriate signals, enabling the shell to manage background and foreground processes.

